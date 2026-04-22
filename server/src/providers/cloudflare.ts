@@ -20,6 +20,14 @@ export class CloudflareProvider extends BaseProvider {
     return { accountId: apiKey.slice(0, sep), token: apiKey.slice(sep + 1) };
   }
 
+  // Cloudflare's OpenAI-compat endpoint rejects `content: null` on assistant
+  // messages that carry tool_calls, even though the OpenAI spec allows it.
+  private normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
+    return messages.map(m =>
+      m.content === null ? { ...m, content: '' } : m,
+    );
+  }
+
   async chatCompletion(
     apiKey: string,
     messages: ChatMessage[],
@@ -37,7 +45,7 @@ export class CloudflareProvider extends BaseProvider {
       },
       body: JSON.stringify({
         model: modelId,
-        messages,
+        messages: this.normalizeMessages(messages),
         temperature: options?.temperature,
         max_tokens: options?.max_tokens,
         top_p: options?.top_p,
@@ -74,7 +82,7 @@ export class CloudflareProvider extends BaseProvider {
       },
       body: JSON.stringify({
         model: modelId,
-        messages,
+        messages: this.normalizeMessages(messages),
         temperature: options?.temperature,
         max_tokens: options?.max_tokens,
         top_p: options?.top_p,

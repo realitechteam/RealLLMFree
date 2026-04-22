@@ -245,10 +245,16 @@ Contributors very welcome! Good first PRs:
 ```bash
 npm install
 npm run dev      # server on :3001, dashboard on :5173, both with HMR
-npm test         # vitest — 69 tests across providers, routes, router, ratelimit
+npm test         # vitest — 75 tests across providers, routes, router, ratelimit
 ```
 
 PRs should include a test, keep the existing test suite green, and match the `.editorconfig` / tsconfig defaults already in the repo. Issues and discussions are open.
+
+### Contributors
+
+Thanks to everyone who's helped improve FreeLLMAPI:
+
+- [@moaaz12-web](https://github.com/moaaz12-web) — tool-calling support across providers (#3)
 
 ## Terms of Service review
 

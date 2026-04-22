@@ -53,4 +53,43 @@ describe('CloudflareProvider', () => {
       provider.chatCompletion('no-colon-here', [{ role: 'user', content: 'Hi' }], 'model')
     ).rejects.toThrow(/account_id:api_token/);
   });
+
+  it('should convert null assistant content to empty string (CF rejects null)', async () => {
+    let capturedBody: any = null;
+    vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          id: 'chatcmpl-cf',
+          object: 'chat.completion',
+          created: 123,
+          model: '@cf/meta/llama-3.1-70b-instruct',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      } as any;
+    });
+
+    await provider.chatCompletion(
+      'abc123:token',
+      [
+        { role: 'user', content: 'Weather?' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'get_weather', arguments: '{"city":"Karachi"}' },
+          }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: '{"temp":30}' },
+      ],
+      '@cf/meta/llama-3.1-70b-instruct',
+    );
+
+    expect(capturedBody.messages[1].content).toBe('');
+    expect(capturedBody.messages[1].tool_calls).toHaveLength(1);
+  });
 });
