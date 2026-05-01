@@ -50,10 +50,10 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/server/dist server/dist
 COPY --from=builder /app/client/dist client/dist
 
-# Persistent volume target — Railway mounts a volume here so the SQLite DB and
-# encrypted keys survive redeploys.
+# Persistent volume target — Railway mounts a volume at /data via the platform
+# config (railway.json + `railway volume add`). Note: Railway rejects Docker
+# `VOLUME` directives, so we only ensure the directory exists.
 RUN mkdir -p /data
-VOLUME ["/data"]
 
 EXPOSE 3001
 
