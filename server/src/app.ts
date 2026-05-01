@@ -17,6 +17,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export function createApp() {
   const app = express();
 
+  // Behind Railway / Cloudflare. Without this, req.ip is the proxy's IP and
+  // every request looks "local" — bypassing the unified-key check.
+  app.set('trust proxy', true);
+
   app.use(helmet({ contentSecurityPolicy: false, hsts: false }));
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));

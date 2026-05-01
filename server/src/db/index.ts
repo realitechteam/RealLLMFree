@@ -6,7 +6,11 @@ import { fileURLToPath } from 'url';
 import { initEncryptionKey } from '../lib/crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.resolve(__dirname, '../../data/realllmfree.db');
+// DATA_DIR lets Railway / Docker mount a persistent volume (e.g. /data) so the
+// SQLite file + encrypted keys survive redeploys. Falls back to repo-local path.
+const DB_PATH = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR, 'realllmfree.db')
+  : path.resolve(__dirname, '../../data/realllmfree.db');
 
 let db: Database.Database;
 

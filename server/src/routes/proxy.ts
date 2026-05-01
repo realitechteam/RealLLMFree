@@ -165,10 +165,20 @@ function isRetryableError(err: any): boolean {
 proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const start = Date.now();
 
-  // Authenticate with unified API key (skip for local requests)
+  // Authenticate with unified API key. Loopback requests skip auth so the local
+  // dashboard playground works without copy-pasting the key. Public deploys
+  // (PUBLIC_DEPLOY=1) require the header even from "loopback" because Railway/
+  // Cloudflare can present 127.0.0.1 from edge proxies on some setups.
   const authHeader = req.headers.authorization;
   const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
-  if (authHeader && !isLocal) {
+  const requireAuth = process.env.PUBLIC_DEPLOY === '1' || !isLocal;
+  if (requireAuth) {
+    if (!authHeader) {
+      res.status(401).json({
+        error: { message: 'Missing Authorization header', type: 'authentication_error' },
+      });
+      return;
+    }
     const token = authHeader.replace(/^Bearer\s+/i, '');
     const unifiedKey = getUnifiedApiKey();
     if (token !== unifiedKey) {
