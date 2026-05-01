@@ -1,5 +1,5 @@
 {
-  "name": "@freellmapi/server",
+  "name": "@realllmfree/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@freellmapi/shared": "*",
+    "@realllmfree/shared": "*",
     "better-sqlite3": "^11.8.1",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.44.2",

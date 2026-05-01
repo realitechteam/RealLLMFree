@@ -2,7 +2,7 @@ import type {
   ChatMessage,
   ChatCompletionResponse,
   ChatCompletionChunk,
-} from '@freellmapi/shared/types.js';
+} from '@realllmfree/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 
 const API_BASE = 'https://router.huggingface.co/fireworks-ai/inference/v1';

@@ -60,8 +60,11 @@ function DarkModeToggle() {
 function Brand() {
   return (
     <div className="flex items-center gap-2">
-      <span className="inline-block size-2 rounded-full bg-foreground" />
-      <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
+      <span
+        className="inline-block size-2 rounded-full"
+        style={{ background: 'linear-gradient(135deg, #57CEDB, #11EEEB)' }}
+      />
+      <span className="font-semibold tracking-tight text-sm">RealLLMFree</span>
     </div>
   )
 }

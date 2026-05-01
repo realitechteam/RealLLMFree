@@ -6,7 +6,7 @@ import type {
   ChatToolChoice,
   ChatToolDefinition,
   TokenUsage,
-} from '@freellmapi/shared/types.js';
+} from '@realllmfree/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
