@@ -24,6 +24,7 @@ const PLATFORMS: { value: Platform; label: string; signupUrl: string }[] = [
   { value: 'moonshot', label: 'Moonshot (Kimi)', signupUrl: 'https://platform.moonshot.ai/console/api-keys' },
   { value: 'minimax', label: 'MiniMax', signupUrl: 'https://platform.minimax.io/login' },
   { value: 'opencode', label: 'OpenCode Free', signupUrl: 'https://opencode.ai/' },
+  { value: 'kiro', label: 'Kiro AI (sidecar gateway)', signupUrl: 'https://github.com/jwadow/kiro-gateway#quick-start' },
 ]
 
 // Recommended starter pack: 3 providers covering speed (Cerebras), code (OpenRouter qwen3-coder),

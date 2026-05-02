@@ -89,6 +89,64 @@ The dashboard is at the same domain (`/`).
 - `/fallback` to reorder priority. The router learns 429 patterns over time, but the static priority is your starting point.
 - `/analytics` to confirm requests are landing.
 
+## Optional: enable Kiro AI for free Claude Sonnet 4.5
+
+Kiro AI is the highest-quality free-tier model in the catalog (Anthropic Sonnet 4.5
+via AWS Builder ID OAuth). It's NOT enabled by default because it requires running
+the [`jwadow/kiro-gateway`](https://github.com/jwadow/kiro-gateway) sidecar, which
+in turn needs credentials extracted from a logged-in Kiro IDE / Kiro CLI session.
+
+### One-time setup
+
+1. **Get Kiro credentials**:
+   - Install Kiro IDE: https://kiro.dev/
+   - Sign in with **AWS Builder ID** (free, no credit card)
+   - Find the credentials file at `~/.aws/sso/cache/kiro-auth-token.json`
+     (Linux/macOS) or `%USERPROFILE%\.aws\sso\cache\kiro-auth-token.json` (Windows)
+   - Copy its `refreshToken` value (a long JWT-like string)
+
+2. **Pick a proxy password** — any random string. Save it; you'll paste it as the
+   "API key" on the Keys page later.
+   ```bash
+   PROXY_KEY=$(openssl rand -hex 24)   # e.g. "9f2a3b…"
+   ```
+
+### Local Docker (single-machine setup)
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="$PROXY_KEY" \
+  -e REFRESH_TOKEN="<paste refreshToken from kiro-auth-token.json>" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+Then on the RealLLMFree server, set:
+```
+KIRO_GATEWAY_URL=http://host.docker.internal:8000/v1
+```
+…and on the Keys page paste `$PROXY_KEY` as a `kiro` API key.
+
+### Railway sibling service
+
+1. Railway project → **+ New** → **Empty Service** → name it `kiro-gateway`.
+2. Settings → **Source** → **Docker Image** → `ghcr.io/jwadow/kiro-gateway:latest`.
+3. Variables → set `PROXY_API_KEY` (random) and `REFRESH_TOKEN` (from step 1 above).
+4. Networking → **Internal Domain** is auto-assigned, e.g. `kiro-gateway.railway.internal`.
+5. Back on the `realllmfree` service → Variables → set
+   `KIRO_GATEWAY_URL=http://kiro-gateway.railway.internal:8000/v1`. Redeploy.
+6. RealLLMFree dashboard → Keys → add a `kiro` row, paste the `PROXY_API_KEY`.
+7. Fallback page → re-enable the kiro models (they default to disabled). Sonnet 4.5
+   has rank 1 and will become the top-priority route once enabled with a working key.
+
+### Rotating the Kiro refresh token
+
+The Builder ID refresh token expires periodically (Kiro IDE refreshes it
+automatically while you use the IDE). If the gateway starts returning 403s, log
+back into Kiro IDE briefly, copy the new `refreshToken`, update the
+`REFRESH_TOKEN` env on `kiro-gateway`, and restart it.
+
 ## Rollback / disaster recovery
 
 - **Bad deploy:** Railway → **Deployments** → click a previous green build → **Redeploy**.

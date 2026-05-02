@@ -126,6 +126,19 @@ describe('Keys API', () => {
     expect(status).toBe(400);
   });
 
+  it('migrateModelsV8 seeds 9 Kiro models without auto-creating a key', async () => {
+    initDb(':memory:');
+    const fresh = getDb();
+    const kiroModels = fresh.prepare(`SELECT model_id FROM models WHERE platform = 'kiro' ORDER BY intelligence_rank, model_id`).all() as any[];
+    expect(kiroModels.length).toBe(9);
+    expect(kiroModels.map(m => m.model_id)).toContain('claude-sonnet-4-5');
+    expect(kiroModels.map(m => m.model_id)).toContain('qwen3-coder-next');
+    // Unlike opencode (no-auth), kiro requires an explicit user-supplied key
+    // (the kiro-gateway PROXY_API_KEY) — no sentinel row should exist.
+    const kiroKey = fresh.prepare(`SELECT * FROM api_keys WHERE platform = 'kiro'`).get();
+    expect(kiroKey).toBeUndefined();
+  });
+
   it('migrateModelsV7 auto-creates the OpenCode no-auth sentinel key', async () => {
     // beforeEach wipes api_keys, so we re-trigger by calling initDb on a fresh
     // memory DB. But here we just inspect: the migration should have run on the

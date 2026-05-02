@@ -46,6 +46,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV5(db);
   migrateModelsV6(db);
   migrateModelsV7(db);
+  migrateModelsV8(db);
   ensureUnifiedKey(db);
 
   console.log(`Database initialized at ${resolvedPath}`);
@@ -725,6 +726,70 @@ function migrateModelsV7(db: Database.Database) {
         INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
         VALUES ('opencode', 'no-auth (free tier)', ?, ?, ?, 'healthy', 1)
       `).run(encrypted, iv, authTag);
+    }
+  });
+  apply();
+}
+
+/**
+ * V8: Kiro AI sidecar (jwadow/kiro-gateway) — exposes AWS Q Developer / Kiro
+ * IDE free-tier models via an OpenAI-compatible local proxy. The user runs
+ * kiro-gateway separately, sets KIRO_GATEWAY_URL on the server, and adds the
+ * PROXY_API_KEY as a regular api_keys row for platform=kiro.
+ *
+ * Free-tier model set per kiro-gateway README (April 2026):
+ *   - claude-sonnet-4-5, claude-haiku-4-5  (Anthropic Sonnet/Haiku 4.5)
+ *   - claude-sonnet-4                       (previous gen)
+ *   - claude-3-7-sonnet                     (legacy)
+ *   - glm-5, deepseek-v3.2                  (frontier MoE)
+ *   - minimax-m2.5, minimax-m2.1
+ *   - qwen3-coder-next
+ *
+ * Note: claude-opus-4-5 was REMOVED from Kiro free tier on 2026-01-17 — we
+ * skip it here. If user has paid Kiro tier, they can manually add the row
+ * via SQL; the catalog default is conservative.
+ *
+ * Ranks: claude-sonnet-4-5 → rank 1 (top of intelligence chain when enabled).
+ * Models are inserted enabled but only route when KIRO_GATEWAY_URL is set
+ * AND the user has added a kiro api_keys row.
+ */
+function migrateModelsV8(db: Database.Database) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const additions: Array<[string, string, string, number, number, string, number | null, number | null, number | null, number | null, string, number | null]> = [
+    // Frontier — Anthropic via Builder ID OAuth, truly unlimited
+    ['kiro', 'claude-sonnet-4-5',  'Claude Sonnet 4.5 (Kiro)',     1,  6, 'Frontier', null, null, null, null, '~unmetered', 200000],
+    ['kiro', 'claude-haiku-4-5',   'Claude Haiku 4.5 (Kiro)',      9,  3, 'Medium',   null, null, null, null, '~unmetered', 200000],
+    // Previous-gen + legacy Anthropic — kept as deeper fallbacks
+    ['kiro', 'claude-sonnet-4',    'Claude Sonnet 4 (Kiro)',       6,  6, 'Frontier', null, null, null, null, '~unmetered', 200000],
+    ['kiro', 'claude-3-7-sonnet',  'Claude 3.7 Sonnet (Kiro)',    14,  6, 'Large',    null, null, null, null, '~unmetered', 200000],
+    // Frontier MoE — open weights routed via Kiro
+    ['kiro', 'glm-5',              'GLM-5 (Kiro)',                 4,  5, 'Frontier', null, null, null, null, '~unmetered', 131072],
+    ['kiro', 'deepseek-v3.2',      'DeepSeek V3.2 (Kiro)',         4,  5, 'Frontier', null, null, null, null, '~unmetered', 131072],
+    ['kiro', 'minimax-m2.5',       'MiniMax M2.5 (Kiro)',          1,  6, 'Large',    null, null, null, null, '~unmetered', 200000],
+    ['kiro', 'minimax-m2.1',       'MiniMax M2.1 (Kiro)',          5,  6, 'Large',    null, null, null, null, '~unmetered', 200000],
+    ['kiro', 'qwen3-coder-next',   'Qwen3 Coder Next (Kiro)',      2,  5, 'Large',    null, null, null, null, '~unmetered', 262144],
+  ];
+
+  const apply = db.transaction(() => {
+    for (const a of additions) insert.run(...a);
+
+    // Kiro is opt-in — user must launch the sidecar + add the PROXY_API_KEY
+    // before routing should consider these models. Disable by default.
+    db.prepare(`UPDATE models SET enabled = 0 WHERE platform = 'kiro'`).run();
+
+    const missing = db.prepare(`
+      SELECT m.id FROM models m
+      LEFT JOIN fallback_config f ON m.id = f.model_db_id
+      WHERE f.id IS NULL ORDER BY m.intelligence_rank ASC
+    `).all() as { id: number }[];
+    if (missing.length > 0) {
+      const maxPriority = (db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
+      const addFb = db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)');
+      for (let i = 0; i < missing.length; i++) addFb.run(missing[i].id, maxPriority + i + 1);
     }
   });
   apply();
