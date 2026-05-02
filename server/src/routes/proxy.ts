@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ChatMessage } from '@realllmfree/shared/types.js';
 import { routeRequest, recordRateLimitHit, recordSuccess, type RouteResult } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown } from '../services/ratelimit.js';
+import { compressMessages } from '../services/compress.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 
 export const proxyRouter = Router();
@@ -228,7 +229,14 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     };
   });
 
-  const estimatedInputTokens = messages.reduce((sum, m) => {
+  // Compress bulky tool-output messages (git diff / grep / find / tree / logs)
+  // before sending to upstream. Lossless on tool_result; never touches user or
+  // assistant text. Set RTK_DISABLE=1 to bypass for debugging.
+  const compressionEnabled = process.env.RTK_DISABLE !== '1';
+  const compressed = compressionEnabled ? compressMessages(messages) : null;
+  const finalMessages = compressed?.messages ?? messages;
+
+  const estimatedInputTokens = finalMessages.reduce((sum, m) => {
     if (typeof m.content !== 'string') return sum;
     return sum + Math.ceil(m.content.length / 4);
   }, 0);
@@ -272,10 +280,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
         if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        if (compressed && compressed.savedBytes > 0) {
+          res.setHeader('X-Tokens-Saved', String(Math.ceil(compressed.savedBytes / 4)));
+        }
 
         let totalOutputTokens = 0;
         const gen = route.provider.streamChatCompletion(
-          route.apiKey, messages, route.modelId,
+          route.apiKey, finalMessages, route.modelId,
           { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
         );
 
@@ -295,7 +306,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         return;
       } else {
         const result = await route.provider.chatCompletion(
-          route.apiKey, messages, route.modelId,
+          route.apiKey, finalMessages, route.modelId,
           { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
         );
 
@@ -306,6 +317,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
 
         res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
         if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        if (compressed && compressed.savedBytes > 0) {
+          res.setHeader('X-Tokens-Saved', String(Math.ceil(compressed.savedBytes / 4)));
+        }
         res.json(result);
 
         logRequest(
