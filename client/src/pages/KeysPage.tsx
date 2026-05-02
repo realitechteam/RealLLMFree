@@ -8,22 +8,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PageHeader } from '@/components/page-header'
 import type { ApiKey, Platform } from '../../../shared/types'
 
-const PLATFORMS: { value: Platform; label: string }[] = [
-  { value: 'google', label: 'Google AI Studio' },
-  { value: 'groq', label: 'Groq' },
-  { value: 'cerebras', label: 'Cerebras' },
-  { value: 'sambanova', label: 'SambaNova' },
-  { value: 'nvidia', label: 'NVIDIA NIM' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'github', label: 'GitHub Models' },
-  { value: 'huggingface', label: 'Hugging Face' },
-  { value: 'cohere', label: 'Cohere' },
-  { value: 'cloudflare', label: 'Cloudflare Workers AI' },
-  { value: 'zhipu', label: 'Zhipu AI (Z.ai)' },
-  { value: 'moonshot', label: 'Moonshot (Kimi)' },
-  { value: 'minimax', label: 'MiniMax' },
+const PLATFORMS: { value: Platform; label: string; signupUrl: string }[] = [
+  { value: 'google', label: 'Google AI Studio', signupUrl: 'https://aistudio.google.com/apikey' },
+  { value: 'groq', label: 'Groq', signupUrl: 'https://console.groq.com/keys' },
+  { value: 'cerebras', label: 'Cerebras', signupUrl: 'https://cloud.cerebras.ai/' },
+  { value: 'sambanova', label: 'SambaNova', signupUrl: 'https://cloud.sambanova.ai/apis' },
+  { value: 'nvidia', label: 'NVIDIA NIM', signupUrl: 'https://build.nvidia.com/' },
+  { value: 'mistral', label: 'Mistral', signupUrl: 'https://console.mistral.ai/api-keys' },
+  { value: 'openrouter', label: 'OpenRouter', signupUrl: 'https://openrouter.ai/keys' },
+  { value: 'github', label: 'GitHub Models', signupUrl: 'https://github.com/settings/personal-access-tokens' },
+  { value: 'huggingface', label: 'Hugging Face', signupUrl: 'https://huggingface.co/settings/tokens' },
+  { value: 'cohere', label: 'Cohere', signupUrl: 'https://dashboard.cohere.com/api-keys' },
+  { value: 'cloudflare', label: 'Cloudflare Workers AI', signupUrl: 'https://dash.cloudflare.com/profile/api-tokens' },
+  { value: 'zhipu', label: 'Zhipu AI (Z.ai)', signupUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
+  { value: 'moonshot', label: 'Moonshot (Kimi)', signupUrl: 'https://platform.moonshot.ai/console/api-keys' },
+  { value: 'minimax', label: 'MiniMax', signupUrl: 'https://platform.minimax.io/login' },
 ]
+
+// Recommended starter pack: 3 providers covering speed (Cerebras), code (OpenRouter qwen3-coder),
+// and breadth (Groq → 1000 RPD on Llama 3.3 70B). Together they unlock ~80% of the catalog
+// with the lowest possible signup friction (no card, no phone for any of these three).
+const STARTER_PACK: Platform[] = ['groq', 'cerebras', 'openrouter']
 
 const statusDot: Record<string, string> = {
   healthy: 'bg-emerald-500',
@@ -121,12 +126,20 @@ function UnifiedKeySection() {
   )
 }
 
+interface BulkResult {
+  ok: { line: number; platform: string; id: number }[]
+  skipped: { line: number; reason: string; raw: string }[]
+}
+
 export default function KeysPage() {
   const queryClient = useQueryClient()
   const [platform, setPlatform] = useState<Platform | ''>('')
   const [apiKey, setApiKey] = useState('')
   const [accountId, setAccountId] = useState('')
   const [label, setLabel] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
 
   const { data: keys = [], isLoading } = useQuery<ApiKey[]>({
     queryKey: ['keys'],
@@ -177,6 +190,24 @@ export default function KeysPage() {
     },
   })
 
+  const bulkImport = useMutation({
+    mutationFn: (text: string) =>
+      apiFetch<BulkResult>('/api/keys/bulk', { method: 'POST', body: JSON.stringify({ text }) }),
+    onSuccess: (data) => {
+      setBulkResult(data)
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+      queryClient.invalidateQueries({ queryKey: ['fallback'] })
+      // Trigger health check on all newly added keys
+      if (data.ok.length > 0) {
+        apiFetch('/api/health/check-all', { method: 'POST' }).catch(() => {})
+      }
+    },
+  })
+
+  const configuredPlatforms = new Set(keys.map(k => k.platform))
+  const missingStarter = STARTER_PACK.filter(p => !configuredPlatforms.has(p))
+
   const needsAccountId = platform === 'cloudflare'
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -201,16 +232,113 @@ export default function KeysPage() {
         title="Keys"
         description="Provider credentials and the unified API key your apps connect with."
         actions={
-          keys.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => checkAll.mutate()} disabled={checkAll.isPending}>
-              {checkAll.isPending ? 'Checking…' : 'Check all'}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
+              Bulk import
             </Button>
-          )
+            {keys.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => checkAll.mutate()} disabled={checkAll.isPending}>
+                {checkAll.isPending ? 'Checking…' : 'Check all'}
+              </Button>
+            )}
+          </div>
         }
       />
 
       <div className="space-y-8">
         <UnifiedKeySection />
+
+        {missingStarter.length > 0 && (
+          <section className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-5">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h2 className="text-sm font-medium">Quick start — recommended starter pack</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  These three free-tier providers cover ~80% of the catalog with no card and no phone verification. Sign up for each, then bulk-paste below.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
+                Bulk import keys
+              </Button>
+            </div>
+            <ol className="space-y-2 text-xs">
+              {STARTER_PACK.map((p, i) => {
+                const meta = PLATFORMS.find(x => x.value === p)!
+                const done = configuredPlatforms.has(p)
+                return (
+                  <li key={p} className="flex items-center gap-3">
+                    <span className={`size-5 inline-flex items-center justify-center rounded-full text-[10px] font-medium ${done ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                      {done ? '✓' : i + 1}
+                    </span>
+                    <span className="font-medium">{meta.label}</span>
+                    <span className="text-muted-foreground">— {p === 'groq' ? 'fast Llama 3.3 70B + GPT-OSS' : p === 'cerebras' ? 'fastest, Qwen3 235B' : '5+ free models incl. qwen3-coder'}</span>
+                    <div className="flex-1" />
+                    {done ? (
+                      <span className="text-[11px] text-emerald-700 dark:text-emerald-400">configured</span>
+                    ) : (
+                      <a href={meta.signupUrl} target="_blank" rel="noreferrer" className="text-[11px] underline hover:no-underline">
+                        Get key →
+                      </a>
+                    )}
+                  </li>
+                )
+              })}
+            </ol>
+          </section>
+        )}
+
+        {bulkOpen && (
+          <section className="rounded-lg border p-5 bg-card">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h2 className="text-sm font-medium">Bulk import</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Paste one key per line in <code className="font-mono">platform=key</code> format. Comments (<code className="font-mono">#</code>) and blank lines are ignored. <code className="font-mono">GROQ_API_KEY=…</code> style works too.
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => { setBulkOpen(false); setBulkResult(null); setBulkText('') }}>
+                Close
+              </Button>
+            </div>
+            <textarea
+              value={bulkText}
+              onChange={e => setBulkText(e.target.value)}
+              placeholder={`groq=gsk_xxxxxxxxxxxxxxxxxxxx\ncerebras=csk-xxxxxxxxxxxxxxxxxxxx\nopenrouter=sk-or-v1-xxxxxxxxxxxxxxxxxxxx\n# Cloudflare needs account_id:token\ncloudflare=YOUR_ACCOUNT_ID:YOUR_TOKEN\n# .env-style aliases also work\nGOOGLE_API_KEY=AIza...`}
+              className="w-full h-40 font-mono text-xs rounded-md border bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+              spellCheck={false}
+            />
+            <div className="flex items-center gap-3 mt-3">
+              <Button size="sm" onClick={() => bulkImport.mutate(bulkText)} disabled={!bulkText.trim() || bulkImport.isPending}>
+                {bulkImport.isPending ? 'Importing…' : 'Import all'}
+              </Button>
+              {bulkImport.isError && (
+                <span className="text-destructive text-xs">{(bulkImport.error as Error).message}</span>
+              )}
+            </div>
+            {bulkResult && (
+              <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <p className="font-medium text-emerald-700 dark:text-emerald-400 mb-1">Imported ({bulkResult.ok.length})</p>
+                  <ul className="space-y-0.5 text-muted-foreground">
+                    {bulkResult.ok.map(o => (
+                      <li key={o.id}>✓ line {o.line}: {o.platform}</li>
+                    ))}
+                    {bulkResult.ok.length === 0 && <li>—</li>}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-medium text-rose-700 dark:text-rose-400 mb-1">Skipped ({bulkResult.skipped.length})</p>
+                  <ul className="space-y-0.5 text-muted-foreground">
+                    {bulkResult.skipped.map((s, i) => (
+                      <li key={i}>line {s.line}: {s.reason}</li>
+                    ))}
+                    {bulkResult.skipped.length === 0 && <li>—</li>}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
 
         <section>
           <h2 className="text-sm font-medium mb-3">Add a provider key</h2>

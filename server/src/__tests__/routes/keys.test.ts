@@ -97,4 +97,32 @@ describe('Keys API', () => {
     const { status } = await request(app, 'DELETE', '/api/keys/99999');
     expect(status).toBe(404);
   });
+
+  it('POST /api/keys/bulk imports multiple keys from .env-style text', async () => {
+    const text = [
+      '# starter pack',
+      'groq=gsk_aaaaaaaaaaaaaaaa',
+      'CEREBRAS_API_KEY="csk-bbbbbbbbbbbbbbbb"',
+      'openrouter=sk-or-v1-cccccccccccccccc',
+      '',
+      'GEMINI_API_KEY=AIzaXXXXXXXXXXXXXXX',
+      'unknown_provider=oops',
+      'kimi=moonshot-key-here',  // alias → moonshot
+    ].join('\n');
+
+    const { status, body } = await request(app, 'POST', '/api/keys/bulk', { text });
+    expect(status).toBe(201);
+    expect(body.ok).toHaveLength(5);
+    expect(body.ok.map((o: any) => o.platform).sort()).toEqual(['cerebras', 'google', 'groq', 'moonshot', 'openrouter']);
+    expect(body.skipped).toHaveLength(1);
+    expect(body.skipped[0].reason).toMatch(/unknown platform/);
+
+    const { body: list } = await request(app, 'GET', '/api/keys');
+    expect(list).toHaveLength(5);
+  });
+
+  it('POST /api/keys/bulk returns 400 when text body is missing', async () => {
+    const { status } = await request(app, 'POST', '/api/keys/bulk', {});
+    expect(status).toBe(400);
+  });
 });
