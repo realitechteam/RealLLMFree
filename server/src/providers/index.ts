@@ -98,6 +98,19 @@ register(new OpenAICompatProvider({
   baseUrl: 'https://api.minimax.io/v1',
 }));
 
+// OpenCode Free - no-auth passthrough proxy at opencode.ai/zen/v1.
+// Models with the `-free` suffix work without an API key (cost: 0); the rest
+// require a paid OpenCode account. The platform is registered with noAuth so the
+// router never sends an Authorization header. Slow path — 30s timeout because
+// requests cascade through OpenCode → upstream provider.
+register(new OpenAICompatProvider({
+  platform: 'opencode',
+  name: 'OpenCode Free',
+  baseUrl: 'https://opencode.ai/zen/v1',
+  noAuth: true,
+  timeoutMs: 30000,
+}));
+
 export function getProvider(platform: Platform): BaseProvider | undefined {
   return providers.get(platform);
 }

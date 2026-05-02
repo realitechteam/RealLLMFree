@@ -125,4 +125,26 @@ describe('Keys API', () => {
     const { status } = await request(app, 'POST', '/api/keys/bulk', {});
     expect(status).toBe(400);
   });
+
+  it('migrateModelsV7 auto-creates the OpenCode no-auth sentinel key', async () => {
+    // beforeEach wipes api_keys, so we re-trigger by calling initDb on a fresh
+    // memory DB. But here we just inspect: the migration should have run on the
+    // shared `app` DB during beforeAll, and the sentinel row may have been
+    // wiped by the global `DELETE FROM api_keys` cleanup in beforeEach.
+    // Instead verify migration is idempotent + restores the row by re-running it.
+    const db = getDb();
+    db.prepare(`DELETE FROM api_keys WHERE platform = 'opencode'`).run();
+    // Manually re-run V7 by importing it would require export — instead
+    // verify the row is gone, then re-init in :memory: to assert presence.
+    expect(db.prepare(`SELECT COUNT(*) AS c FROM api_keys WHERE platform = 'opencode'`).get()).toEqual({ c: 0 });
+    initDb(':memory:');
+    const fresh = getDb();
+    const opencodeKey = fresh.prepare(`SELECT * FROM api_keys WHERE platform = 'opencode'`).get() as any;
+    expect(opencodeKey).toBeTruthy();
+    expect(opencodeKey.status).toBe('healthy');
+    expect(opencodeKey.label).toContain('no-auth');
+    const opencodeModels = fresh.prepare(`SELECT model_id FROM models WHERE platform = 'opencode'`).all() as any[];
+    expect(opencodeModels.length).toBe(5);
+    expect(opencodeModels.map(m => m.model_id)).toContain('minimax-m2.5-free');
+  });
 });

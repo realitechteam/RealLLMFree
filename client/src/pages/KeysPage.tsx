@@ -23,6 +23,7 @@ const PLATFORMS: { value: Platform; label: string; signupUrl: string }[] = [
   { value: 'zhipu', label: 'Zhipu AI (Z.ai)', signupUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
   { value: 'moonshot', label: 'Moonshot (Kimi)', signupUrl: 'https://platform.moonshot.ai/console/api-keys' },
   { value: 'minimax', label: 'MiniMax', signupUrl: 'https://platform.minimax.io/login' },
+  { value: 'opencode', label: 'OpenCode Free', signupUrl: 'https://opencode.ai/' },
 ]
 
 // Recommended starter pack: 3 providers covering speed (Cerebras), code (OpenRouter qwen3-coder),

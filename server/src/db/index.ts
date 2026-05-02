@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initEncryptionKey } from '../lib/crypto.js';
+import { initEncryptionKey, encrypt } from '../lib/crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR lets Railway / Docker mount a persistent volume (e.g. /data) so the
@@ -45,6 +45,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV4(db);
   migrateModelsV5(db);
   migrateModelsV6(db);
+  migrateModelsV7(db);
   ensureUnifiedKey(db);
 
   console.log(`Database initialized at ${resolvedPath}`);
@@ -660,6 +661,70 @@ function migrateModelsV6(db: Database.Database) {
       const maxPriority = (db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
       const addFb = db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)');
       for (let i = 0; i < missing.length; i++) addFb.run(missing[i].id, maxPriority + i + 1);
+    }
+  });
+  apply();
+}
+
+/**
+ * V7: OpenCode Free — no-auth passthrough proxy at opencode.ai/zen/v1 that
+ * exposes 5 frontier-tier models with `cost: 0` and no API key required.
+ * Verified live on 2026-05-02 (probe replied HTTP 200, usage.cost=0).
+ *
+ * Adds 5 models and a sentinel `api_keys` row with placeholder ciphertext so the
+ * router treats the platform as "having a key" without the user ever signing up.
+ * The provider adapter is registered with noAuth=true and ignores the apiKey arg.
+ *
+ * If OpenCode adds rate limits later, all 5 rows can be re-tuned in V8 — leave
+ * limits null for now (router's dynamic 429 penalty will demote on first hit).
+ */
+function migrateModelsV7(db: Database.Database) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // Ranks calibrated against equivalent OR :free routes (V3 ranks where comparable).
+  // minimax-m2.5 was rank 1 in V3; ling-2.6 was 7; nemotron-3-super was 22 (V4).
+  // hy3-preview = Tencent Hunyuan 3 preview, slot at 9 by reputation.
+  // trinity-large-preview was rank 13 then removed in V6 — re-introduce at 13 here.
+  const additions: Array<[string, string, string, number, number, string, number | null, number | null, number | null, number | null, string, number | null]> = [
+    ['opencode', 'minimax-m2.5-free',           'MiniMax M2.5 (OpenCode)',         1,  9, 'Frontier', null, null, null, null, '~unmetered', 196608],
+    ['opencode', 'ling-2.6-flash-free',         'Ling 2.6 Flash (OpenCode)',       7,  9, 'Large',    null, null, null, null, '~unmetered', 262144],
+    ['opencode', 'hy3-preview-free',            'Hunyuan 3 Preview (OpenCode)',    9,  9, 'Large',    null, null, null, null, '~unmetered', 131072],
+    ['opencode', 'trinity-large-preview-free',  'Trinity Large Preview (OpenCode)', 13, 9, 'Frontier', null, null, null, null, '~unmetered', 131072],
+    ['opencode', 'nemotron-3-super-free',       'Nemotron 3 Super (OpenCode)',     22, 9, 'Large',    null, null, null, null, '~unmetered', 262144],
+  ];
+
+  const apply = db.transaction(() => {
+    for (const a of additions) insert.run(...a);
+
+    // Backfill fallback_config rows for the new opencode models.
+    const missing = db.prepare(`
+      SELECT m.id FROM models m
+      LEFT JOIN fallback_config f ON m.id = f.model_db_id
+      WHERE f.id IS NULL ORDER BY m.intelligence_rank ASC
+    `).all() as { id: number }[];
+    if (missing.length > 0) {
+      const maxPriority = (db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
+      const addFb = db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)');
+      for (let i = 0; i < missing.length; i++) addFb.run(missing[i].id, maxPriority + i + 1);
+    }
+
+    // Auto-create the sentinel api_keys row so the router sees `opencode` as
+    // having a healthy key without the user ever clicking "Add". The
+    // OpenCodeFreeProvider's noAuth=true means the actual ciphertext is never
+    // sent on the wire — we still encrypt a placeholder so the existing
+    // decrypt() call in router.ts doesn't blow up.
+    const existingNoAuth = db.prepare(
+      `SELECT id FROM api_keys WHERE platform = 'opencode' LIMIT 1`
+    ).get();
+    if (!existingNoAuth) {
+      const { encrypted, iv, authTag } = encrypt('noauth');
+      db.prepare(`
+        INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+        VALUES ('opencode', 'no-auth (free tier)', ?, ?, ?, 'healthy', 1)
+      `).run(encrypted, iv, authTag);
     }
   });
   apply();

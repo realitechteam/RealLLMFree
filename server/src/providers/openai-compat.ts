@@ -20,6 +20,9 @@ export class OpenAICompatProvider extends BaseProvider {
   /** Per-provider HTTP timeout override. Cloud APIs finish in ~15s; locally-hosted
    * inference (llama.cpp / vLLM on CPU) can take 30-120s for long prompts. Default 15000. */
   private readonly timeoutMs: number;
+  /** When true, skip Authorization header — for no-auth proxies like OpenCode Free
+   * that take any string (or empty) as the API key. */
+  private readonly noAuth: boolean;
 
   constructor(opts: {
     platform: Platform;
@@ -28,6 +31,7 @@ export class OpenAICompatProvider extends BaseProvider {
     extraHeaders?: Record<string, string>;
     validateUrl?: string;
     timeoutMs?: number;
+    noAuth?: boolean;
   }) {
     super();
     this.platform = opts.platform;
@@ -36,6 +40,11 @@ export class OpenAICompatProvider extends BaseProvider {
     this.extraHeaders = opts.extraHeaders ?? {};
     this.validateUrl = opts.validateUrl;
     this.timeoutMs = opts.timeoutMs ?? 15000;
+    this.noAuth = opts.noAuth ?? false;
+  }
+
+  private authHeaders(apiKey: string): Record<string, string> {
+    return this.noAuth ? {} : { 'Authorization': `Bearer ${apiKey}` };
   }
 
   async chatCompletion(
@@ -47,7 +56,7 @@ export class OpenAICompatProvider extends BaseProvider {
     const res = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        ...this.authHeaders(apiKey),
         'Content-Type': 'application/json',
         ...this.extraHeaders,
       },
@@ -82,7 +91,7 @@ export class OpenAICompatProvider extends BaseProvider {
     const res = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        ...this.authHeaders(apiKey),
         'Content-Type': 'application/json',
         ...this.extraHeaders,
       },
@@ -133,6 +142,7 @@ export class OpenAICompatProvider extends BaseProvider {
   }
 
   async validateKey(apiKey: string): Promise<boolean> {
+    if (this.noAuth) return true;
     try {
       const url = this.validateUrl ?? `${this.baseUrl}/models`;
       const res = await this.fetchWithTimeout(url, {
